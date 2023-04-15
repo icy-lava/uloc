@@ -7,12 +7,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include "dirent.h"
+
 #ifdef _WIN64
 #define ftello _ftelli64
 #else
 #define ftello ftell
 #endif
 
+#else
+#include <dirent.h>
 #endif
 
 #include <stdint.h>
@@ -129,11 +133,15 @@ static int compareLines(const void *a, const void *b) {
 
 void usage(FILE *stream) {
 	if(stream == NULL) stream = stderr;
-	fprintf(stream, "Usage: uloc <file|directory>...\n");
-	fputc('\n', stream);
-	fprintf(stream, "Options:\n");
-	fprintf(stream, "    -help : show this help page\n");
-	fprintf(stream, "    --    : interpret the rest of the args as files/directories\n");
+	fputs(
+		"Usage: uloc <file|directory|-option>...\n\n"
+		"Options:\n"
+		"    -help   : show this help page\n"
+		"    -all    : don't ignore names that start with a dot\n"
+		"    -fslash : use forward-slashes as directory separators\n"
+		"    -bslash : use back-slashes as directory separators\n"
+		"    --      : interpret the rest of the args as files/directories\n"
+	, stream);
 }
 
 int main(int argc, char *argv[]) {
@@ -154,6 +162,13 @@ int main(int argc, char *argv[]) {
 	////////////////////////////////////////
 	
 	FileInfo *files = NULL;
+	
+	#ifdef _WIN32
+	char slash = '\\';
+	#else
+	char slash = '/';
+	#endif
+	bool dotfiles = false;
 	
 	////////////////////////////
 	/// CLI argument parsing ///
@@ -184,6 +199,21 @@ int main(int argc, char *argv[]) {
 				return 0;
 			}
 			
+			if(matchInsensitive(arg, litToString("-all"))) {
+				dotfiles = true;
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-fslash"))) {
+				slash = '/';
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-bslash"))) {
+				slash = '\\';
+				continue;
+			}
+			
 			fprintf(stderr, "Error: unknown option %s\n", argv[i]);
 			usage(stderr);
 			return 1;
@@ -203,6 +233,59 @@ int main(int argc, char *argv[]) {
 	
 	/// CLI argument parsing ///
 	////////////////////////////
+	
+	/////////////////////////////////
+	/// Find files in directories ///
+	
+	for(int i = 0; i < arrlen(files); i++) {
+		FileInfo *finfo = files + i;
+		String path = finfo->path;
+		
+		DIR *dir = opendir(path.start);
+		
+		// If dir is NULL, it's probably not a directory. If it doesn't exist at all,
+		// we'll print a warning later.
+		if(dir != NULL) {
+			struct dirent *ent;
+			while((ent = readdir(dir)) != NULL) {
+				if(strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+				
+				// I assume we can't have 0 length filenames
+				if(!dotfiles && ent->d_name[0] == '.') continue;
+				
+				unat d_namlen = strlen(ent->d_name);
+				
+				// Create new path with file name appended
+				char *newPath = malloc(path.size + d_namlen + 1 + 1);
+				memcpy(newPath, path.start, path.size);
+				newPath[path.size] = slash;
+				memcpy(newPath + path.size + 1, ent->d_name, d_namlen);
+				
+				unat newPathSize = path.size + 1 + d_namlen;
+				newPath[newPathSize] = 0;
+				
+				String newPathString = {
+					.size = newPathSize,
+					.start = newPath
+				};
+				
+				// Add to file list. We don't know if it's a directory yet, but it'll get taken
+				// care of in the outer loop, since we're pushing this onto the end of the list.
+				arrput(files, (FileInfo) {
+					.path = newPathString
+				});
+			}
+			
+			// It's clearly not a file, so remove it
+			arrdel(files, i);
+			i--;
+		}
+		
+		closedir(dir);
+	}
+	
+	/// Find files in directories ///
+	/////////////////////////////////
 	
 	////////////////////////////////////
 	/// Find file name and extension ///
@@ -284,6 +367,12 @@ int main(int argc, char *argv[]) {
 		fflush(stderr);
 	}
 	
+	if(arrlen(files) == 0) {
+		fputs("Error: no files to scan\n", stderr);
+		usage(stderr);
+		return status;
+	}
+	
 	/// File reading ///
 	////////////////////
 	
@@ -342,7 +431,7 @@ int main(int argc, char *argv[]) {
 		}
 		
 		float percent = finfo->lineCountUnique * 100.0f / finfo->lineCount;
-		printf("    %s: %zu/%zu (%4.1f%%)\n", finfo->path.start, finfo->lineCountUnique, finfo->lineCount, percent);
+		printf("    %s: %zu/%zu : %.1f%%\n", finfo->path.start, finfo->lineCountUnique, finfo->lineCount, percent);
 		
 		totalLineCount += finfo->lineCount;
 	}
@@ -359,7 +448,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	float percent = totalLineCountUnique * 100.0f / totalLineCount;
-	printf("    total: %zu/%zu (%4.1f%%)\n", totalLineCountUnique, totalLineCount, percent);
+	printf("    total: %zu/%zu : %.1f%%\n", totalLineCountUnique, totalLineCount, percent);
 	
 	/// Line counting ///
 	/////////////////////
