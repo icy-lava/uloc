@@ -137,12 +137,21 @@ void usage(FILE *stream) {
 }
 
 int main(int argc, char *argv[]) {
-#ifdef _WIN32
-	_setmode(0, 0x8000);
-	_setmode(1, 0x8000);
-	SetConsoleCP(CP_UTF8);
-	SetConsoleOutputCP(CP_UTF8);
-#endif
+	
+	////////////////////////////////////////
+	/// Enable UTF8 binary IO on Windows ///
+	
+	// NOTE: manifest.xml should be applied to the executable, so that argv is UTF8 rather than ASCII
+	
+	#ifdef _WIN32
+		_setmode(0, 0x8000);
+		_setmode(1, 0x8000);
+		SetConsoleCP(CP_UTF8);
+		SetConsoleOutputCP(CP_UTF8);
+	#endif
+	
+	/// Enable UTF8 binary IO on Windows ///
+	////////////////////////////////////////
 	
 	FileInfo *files = NULL;
 	
@@ -270,6 +279,11 @@ int main(int argc, char *argv[]) {
 		finfo->data = fdata;
 	}
 	
+	if(status != 0) {
+		fputc('\n', stderr);
+		fflush(stderr);
+	}
+	
 	/// File reading ///
 	////////////////////
 	
@@ -279,10 +293,13 @@ int main(int argc, char *argv[]) {
 	/////////////////////
 	/// Line counting ///
 	
+	printf("Unique lines:\n");
+	
 	for(int i = 0; i < arrlen(files); i++) {
 		FileInfo *finfo = files + i;
-		
 		FileData *fdata = finfo->data;
+		
+		// Count number of lines which are not whitespace only, and put them into the lines array
 		char *start = fdata->data;
 		char *stop = start;
 		while((stop - fdata->data) < fdata->size) {
@@ -325,10 +342,12 @@ int main(int argc, char *argv[]) {
 		}
 		
 		float percent = finfo->lineCountUnique * 100.0f / finfo->lineCount;
-		printf("file '%s': %zu/%zu unique lines (%4.1f%%)\n", finfo->path.start, finfo->lineCountUnique, finfo->lineCount, percent);
+		printf("    %s: %zu/%zu (%4.1f%%)\n", finfo->path.start, finfo->lineCountUnique, finfo->lineCount, percent);
 		
 		totalLineCount += finfo->lineCount;
 	}
+	
+	putc('\n', stdout);
 	
 	qsort(lines, totalLineCount, sizeof(*lines), compareLines);
 	
@@ -340,7 +359,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	float percent = totalLineCountUnique * 100.0f / totalLineCount;
-	printf("total: %zu/%zu unique lines (%4.1f%%)\n", totalLineCountUnique, totalLineCount, percent);
+	printf("    total: %zu/%zu (%4.1f%%)\n", totalLineCountUnique, totalLineCount, percent);
 	
 	/// Line counting ///
 	/////////////////////
