@@ -1,5 +1,5 @@
 #define MAJOR 0
-#define MINOR 1
+#define MINOR 2
 #define PATCH 0
 
 #define _STR(x) #x
@@ -46,6 +46,7 @@ typedef int bool;
 #define false 0
 
 #define structdef(name) typedef struct name name; struct name
+#define enumdef(name)   typedef enum   name name; enum   name
 
 structdef(FileData) {
 	unat size;
@@ -74,6 +75,12 @@ structdef(FileInfo) {
 	unat lineCountUnique;
 	
 	FileData *data;
+};
+
+enumdef(OutputFormat) {
+	OUTPUT_DEFAULT,
+	OUTPUT_CSV,
+	OUTPUT_TSV,
 };
 
 #define uloc_error(var, message) do {assert((var) != NULL); *(var) = (message); return NULL;} while(0)
@@ -153,14 +160,46 @@ void usage(FILE *stream) {
 	, stream);
 	version(stream);
 	fputs(
-		"\nOptions:\n"
-		"    -help    : show this help page\n"
-		"    -version : get uloc version information\n"
-		"    -all     : don't ignore names that start with a dot\n"
-		"    -fslash  : use forward-slashes as directory separators\n"
-		"    -bslash  : use back-slashes as directory separators\n"
-		"    --       : interpret the rest of the args as files/directories\n"
+		"\n"
+		"Options:\n"
+		"    -help     : show this help page\n"
+		"    -version  : get uloc version information\n"
+		"    -all      : don't ignore names that start with a dot\n"
+		"    -fslash   : use forward-slashes as directory separators\n"
+		"    -bslash   : use back-slashes as directory separators\n"
+		"    -name     : use file name instead of full path for output\n"
+		"    --        : interpret the rest of the args as files/directories\n"
+		"\n"
+		"Output options:"
+		"    -noheader : don't output the header for csv/tsv formats\n"
+		"    -csv      : output information as comma separated values\n"
+		"    -tsv      : output information as tab separated values\n"
 	, stream);
+}
+
+static void outputLineDefault(char *path, unat ulines, unat slines) {
+	float percent = ulines * 100.0f / slines;
+	printf("    %s: %zu/%zu : %.1f%%\n", path, ulines, slines, percent);
+}
+
+static void outputLineValues(OutputFormat outputFormat, FileInfo *finfo) {
+	char *filepath = finfo->path.start;
+	char *filename = finfo->name.start;
+	char *fileext = finfo->ext.start;
+	if(fileext == NULL) fileext = "none";
+	
+	unat ulines = finfo->lineCountUnique;
+	unat slines = finfo->lineCount;
+	float ratio = (float)ulines / slines;
+	
+	switch(outputFormat) {
+		case OUTPUT_CSV: {
+			printf("%s,%s,%s,%zu,%zu\n,%f", filepath, filename, fileext, ulines, slines, ratio);
+		} break;
+		case OUTPUT_TSV: {
+			printf("%s\t%s\t%s\t%zu\t%zu\t%f\n", filepath, filename, fileext, ulines, slines, ratio);
+		} break;
+	}
 }
 
 int main(int argc, char *argv[]) {
@@ -193,7 +232,12 @@ int main(int argc, char *argv[]) {
 	#else
 	char slash = '/';
 	#endif
+	
 	bool dotfiles = false;
+	bool outputHeader = true;
+	bool nameOnly = false;
+	
+	OutputFormat outputFormat = OUTPUT_DEFAULT;
 	
 	////////////////////////////
 	/// CLI argument parsing ///
@@ -241,6 +285,26 @@ int main(int argc, char *argv[]) {
 			
 			if(matchInsensitive(arg, litToString("-bslash"))) {
 				slash = '\\';
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-name"))) {
+				nameOnly = true;
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-noheader"))) {
+				outputHeader = false;
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-csv"))) {
+				outputFormat = OUTPUT_CSV;
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-tsv"))) {
+				outputFormat = OUTPUT_TSV;
 				continue;
 			}
 			
@@ -379,7 +443,7 @@ int main(int argc, char *argv[]) {
 				fprintf(stderr, "File errors:\n");
 				status = 1;
 			}
-			fprintf(stderr, "    %s: %s\n", filepath, errorMessage);
+			fprintf(stderr, "    %s: %s\n", nameOnly ? finfo->name.start : filepath, errorMessage);
 		}
 		
 		// Remove file from our list if we couldn't read it or it was empty
@@ -409,10 +473,24 @@ int main(int argc, char *argv[]) {
 	String *lines = NULL;
 	unat totalLineCount = 0;
 	
-	/////////////////////
-	/// Line counting ///
+	////////////////////////////////
+	/// Line counting and output ///
 	
-	printf("Unique lines:\n");
+	switch(outputFormat) {
+		case OUTPUT_DEFAULT: {
+			printf("Unique lines:\n");
+		} break;
+		case OUTPUT_CSV: {
+			if(outputHeader) {
+				puts("filepath,filename,fileext,unique lines,source lines,ratio");
+			}
+		} break;
+		case OUTPUT_TSV: {
+			if(outputHeader) {
+				puts("filepath\tfilename\tfileext\tunique lines\tsource lines\tratio");
+			}
+		} break;
+	}
 	
 	for(int i = 0; i < arrlen(files); i++) {
 		FileInfo *finfo = files + i;
@@ -461,13 +539,21 @@ int main(int argc, char *argv[]) {
 			if(compareStrings(*prev, *line) != 0) finfo->lineCountUnique++;
 		}
 		
-		float percent = finfo->lineCountUnique * 100.0f / finfo->lineCount;
-		printf("    %s: %zu/%zu : %.1f%%\n", finfo->path.start, finfo->lineCountUnique, finfo->lineCount, percent);
+		switch(outputFormat) {
+		case OUTPUT_DEFAULT: {
+			outputLineDefault(nameOnly ? finfo->name.start : finfo->path.start, finfo->lineCountUnique, finfo->lineCount);
+		}
+		case OUTPUT_CSV:
+		case OUTPUT_TSV:
+			outputLineValues(outputFormat, finfo);
+		}
 		
 		totalLineCount += finfo->lineCount;
 	}
 	
-	putc('\n', stdout);
+	if(outputFormat == OUTPUT_DEFAULT) {
+		putc('\n', stdout);
+	}
 	
 	qsort(lines, totalLineCount, sizeof(*lines), compareLines);
 	
@@ -478,11 +564,12 @@ int main(int argc, char *argv[]) {
 		if(compareStrings(*prev, *line) != 0) totalLineCountUnique++;
 	}
 	
-	float percent = totalLineCountUnique * 100.0f / totalLineCount;
-	printf("    total: %zu/%zu : %.1f%%\n", totalLineCountUnique, totalLineCount, percent);
+	if(outputFormat == OUTPUT_DEFAULT) {
+		outputLineDefault("total", totalLineCountUnique, totalLineCount);
+	}
 	
-	/// Line counting ///
-	/////////////////////
+	/// Line counting and output ///
+	////////////////////////////////
 	
 	return status;
 }
