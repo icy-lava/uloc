@@ -40,21 +40,28 @@ structdef(FileData) {
 	char data[0];
 };
 
-structdef(Line) {
+structdef(String) {
 	unat size;
 	char *start;
 };
 
+#define litToString(lit) ((String){.size = sizeof(lit) - 1, .start = lit})
+static inline String cstrToString(const char *cstr) {
+	return (String){
+		.size = strlen(cstr),
+		.start = (char*)cstr
+	};
+}
+
 structdef(FileInfo) {
-	char *path;
-	char *name;
-	char *ext;
+	String path;
+	String name;
+	String ext;
 	
 	unat lineCount;
 	unat lineCountUnique;
 	
 	FileData *data;
-	Line     *lines;
 };
 
 #define uloc_error(var, message) do {assert((var) != NULL); *(var) = (message); return NULL;} while(0)
@@ -77,7 +84,7 @@ FileData *readFile(char *path, char **errorMessage) {
 	fdata->size = pos;
 	
 	// Read contents of file to memory
-	uloc_assert(fread(fdata->data, pos, 1, file) == 1, errorMessage, "failed to read from file");
+	uloc_assert(fread(fdata->data, pos, 1, file) == 1, errorMessage, "failed to read file");
 	
 	fclose(file);
 	
@@ -93,33 +100,40 @@ static inline bool isWhitespace(char c) {
 	return c == ' ' || c == '\t' || c == '\r';
 }
 
-bool matchInsensitive(char *a, char *b) {
-	unat alen = strlen(a);
-	unat blen = strlen(b);
+bool matchInsensitive(String a, String b) {
+	if(a.size != b.size) return false;
 	
-	if(alen != blen) return false;
-	
-	for(unat i = 0; i < alen; i++) {
-		if(toLower(a[i]) != toLower(b[i])) return false;
+	for(unat i = 0; i < a.size; i++) {
+		if(toLower(a.start[i]) != toLower(b.start[i])) return false;
 	}
 	
 	return true;
 }
 
-static inline int compareLines(const void *a, const void *b) {
-	const Line *lineA = a;
-	const Line *lineB = b;
+static inline int compareStrings(const String left, const String right) {
+	unat minSize = left.size;
+	if(right.size > minSize) minSize = right.size;
 	
-	unat minSize = lineA->size;
-	if(lineB->size > minSize) minSize = lineB->size;
-	
-	int comparison = memcmp(lineA->start, lineB->start, minSize);
+	int comparison = memcmp(left.start, right.start, minSize);
 	if(comparison == 0) {
-		if(lineA->size < lineB->size) return -1;
-		return lineA->size > lineB->size;
+		if(left.size < right.size) return -1;
+		return left.size > right.size;
 	}
 	
 	return comparison;
+}
+
+static int compareLines(const void *a, const void *b) {
+	return compareStrings(*(const String*)a, *(const String*)b);
+}
+
+void usage(FILE *stream) {
+	if(stream == NULL) stream = stderr;
+	fprintf(stream, "Usage: uloc <file|directory>...\n");
+	fputc('\n', stream);
+	fprintf(stream, "Options:\n");
+	fprintf(stream, "    -help : show this help page\n");
+	fprintf(stream, "    --    : interpret the rest of the args as files/directories\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -130,29 +144,66 @@ int main(int argc, char *argv[]) {
 	SetConsoleOutputCP(CP_UTF8);
 #endif
 	
-	int status = 0;
-	
 	FileInfo *files = NULL;
-	Line *lines = NULL;
-	unat totalLineCount = 0;
+	
+	////////////////////////////
+	/// CLI argument parsing ///
+	
+	bool wantOptions = true;
 	
 	for(int i = 1; i < argc; i++) {
-		char *filepath = argv[i];
-		unat pathLength = strlen(filepath);
-		
-		char *errorMessage = NULL;
-		FileData *fdata = readFile(filepath, &errorMessage);
-		if(errorMessage != NULL) {
-			if(status == 0) {
-				fprintf(stderr, "File errors:\n");
-				status = 1;
+		String arg = cstrToString(argv[i]);
+		if(wantOptions && arg.size > 0 && arg.start[0] == '-') {
+			if(compareStrings(arg, litToString("-")) == 0) {
+				// TODO: handle stdin input
+				continue;
 			}
-			fprintf(stderr, "    %s: %s\n", filepath, errorMessage);
-			continue;
+			
+			if(compareStrings(arg, litToString("--")) == 0) {
+				wantOptions = false;
+				continue;
+			}
+			
+			// Tolerate double dashes
+			if(arg.size >= 2 && arg.start[1] == '-') {
+				arg.size--;
+				arg.start++;
+			}
+			
+			if(matchInsensitive(arg, litToString("-help"))) {
+				usage(stdout);
+				return 0;
+			}
+			
+			fprintf(stderr, "Error: unknown option %s\n", argv[i]);
+			usage(stderr);
+			return 1;
 		}
-		if(fdata == NULL) continue;
 		
-		// Find filename by iterating backwards and checking for slash/bslash
+		if(arg.size == 0) {
+			fprintf(stderr, "Error: file path must not be empty\n");
+			usage(stderr);
+			return 1;
+		}
+		
+		FileInfo finfo = {
+			.path = arg
+		};
+		arrput(files, finfo);
+	}
+	
+	/// CLI argument parsing ///
+	////////////////////////////
+	
+	////////////////////////////////////
+	/// Find file name and extension ///
+	
+	for(int i = 0; i < arrlen(files); i++) {
+		FileInfo *finfo = files + i;
+		char *filepath = finfo->path.start;
+		unat pathLength = finfo->path.size;
+		
+		// Find filename by iterating backwards and checking for a slash/bslash
 		char *filename = filepath + pathLength - 1;
 		for(; filename >= filepath; filename--) {
 			if(filename[0] == '/' || filename[0] == '\\') {
@@ -175,78 +226,124 @@ int main(int argc, char *argv[]) {
 			extension = NULL;
 		}
 		
-		FileInfo finfo = {
-			.path = filepath,
-			.name = filename,
-			.ext  = extension,
-			
-			.lineCount = 0,
-			.lineCountUnique = 0
+		finfo->name = (String) {
+			.size = strlen(filename),
+			.start = filename
 		};
 		
-		// Line counting
-		{
-			char *start = fdata->data;
-			char *stop = start;
-			while((stop - fdata->data) < fdata->size) {
-				Line line = {
-					.start = start
-				};
-				
-				// Keep moving up `stop` until LF or EOF
-				for(; stop[0] != '\n' && (stop - fdata->data) < fdata->size; stop++) {}
-				start = stop + 1;
-				
-				for(; line.start < stop; line.start++) {
-					if(!isWhitespace(line.start[0])) {
-						break;
-					}
-				}
-				
-				for(; stop > line.start; stop--) {
-					if(!isWhitespace(stop[0])) {
-						break;
-					}
-				}
-				
-				if(line.start < stop) {
-					line.size = stop - line.start;
-					arrput(lines, line);
-					finfo.lineCount++;
-				}
-				
-				stop = start;
+		finfo->ext = (String) {
+			.size = extension ? strlen(extension) : 0,
+			.start = extension
+		};
+	}
+	
+	/// Find file name and extension ///
+	////////////////////////////////////
+	
+	int status = 0;
+	
+	////////////////////
+	/// File reading ///
+	
+	for(int i = 0; i < arrlen(files); i++) {
+		FileInfo *finfo = files + i;
+		char *filepath = finfo->path.start;
+		
+		char *errorMessage = NULL;
+		FileData *fdata = readFile(filepath, &errorMessage);
+		
+		if(errorMessage != NULL) {
+			if(status == 0) {
+				fprintf(stderr, "File errors:\n");
+				status = 1;
 			}
+			fprintf(stderr, "    %s: %s\n", filepath, errorMessage);
 		}
 		
-		qsort(lines + totalLineCount, finfo.lineCount, sizeof(*lines), compareLines);
-		
-		finfo.lineCountUnique = finfo.lineCount != 0;
-		for(unat j = 1; j < finfo.lineCount; j++) {
-			Line *line = lines + totalLineCount + j;
-			Line *prev = line - 1;
-			if(compareLines(prev, line) != 0) finfo.lineCountUnique++;
+		// Remove file from our list if we couldn't read it
+		if(fdata == NULL) {
+			arrdel(files, i);
+			i--;
+			continue;
 		}
 		
-		float percent = finfo.lineCountUnique * 100.0f / finfo.lineCount;
-		printf("file '%s': %zu/%zu unique lines (%4.1f%%)\n", filepath, finfo.lineCountUnique, finfo.lineCount, percent);
+		finfo->data = fdata;
+	}
+	
+	/// File reading ///
+	////////////////////
+	
+	String *lines = NULL;
+	unat totalLineCount = 0;
+	
+	/////////////////////
+	/// Line counting ///
+	
+	for(int i = 0; i < arrlen(files); i++) {
+		FileInfo *finfo = files + i;
 		
-		totalLineCount += finfo.lineCount;
+		FileData *fdata = finfo->data;
+		char *start = fdata->data;
+		char *stop = start;
+		while((stop - fdata->data) < fdata->size) {
+			String line = {
+				.start = start
+			};
+			
+			// Keep moving up `stop` until LF or EOF
+			for(; stop[0] != '\n' && (stop - fdata->data) < fdata->size; stop++) {}
+			start = stop + 1;
+			
+			for(; line.start < stop; line.start++) {
+				if(!isWhitespace(line.start[0])) {
+					break;
+				}
+			}
+			
+			for(; stop > line.start; stop--) {
+				if(!isWhitespace(stop[0])) {
+					break;
+				}
+			}
+			
+			if(line.start < stop) {
+				line.size = stop - line.start;
+				arrput(lines, line);
+				finfo->lineCount++;
+			}
+			
+			stop = start;
+		}
 		
-		arrput(files, finfo);
+		qsort(lines + totalLineCount, finfo->lineCount, sizeof(*lines), compareLines);
+		
+		finfo->lineCountUnique = finfo->lineCount != 0;
+		for(unat j = 1; j < finfo->lineCount; j++) {
+			String *line = lines + totalLineCount + j;
+			String *prev = line - 1;
+			if(compareStrings(*prev, *line) != 0) finfo->lineCountUnique++;
+		}
+		
+		float percent = finfo->lineCountUnique * 100.0f / finfo->lineCount;
+		printf("file '%s': %zu/%zu unique lines (%4.1f%%)\n", finfo->path.start, finfo->lineCountUnique, finfo->lineCount, percent);
+		
+		totalLineCount += finfo->lineCount;
 	}
 	
 	qsort(lines, totalLineCount, sizeof(*lines), compareLines);
 	
 	unat totalLineCountUnique = totalLineCount != 0;
 	for(unat j = 1; j < totalLineCount; j++) {
-		Line *line = lines + j;
-		Line *prev = line - 1;
-		if(compareLines(prev, line) != 0) totalLineCountUnique++;
+		String *line = lines + j;
+		String *prev = line - 1;
+		if(compareStrings(*prev, *line) != 0) totalLineCountUnique++;
 	}
 	
 	float percent = totalLineCountUnique * 100.0f / totalLineCount;
 	printf("total: %zu/%zu unique lines (%4.1f%%)\n", totalLineCountUnique, totalLineCount, percent);
+	
+	/// Line counting ///
+	/////////////////////
 	
 	return status;
 }
