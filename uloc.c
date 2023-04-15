@@ -80,6 +80,8 @@ FileData *readFile(char *path, char **errorMessage) {
 	unat pos = ftello(file);
 	fseek(file, 0, SEEK_SET);
 	
+	if(pos == 0) return NULL;
+	
 	// Allocate enough memory for size + data
 	FileData *fdata = malloc(sizeof(FileData) + pos);
 	uloc_assert(fdata != NULL, errorMessage, "could not allocate memory");
@@ -352,7 +354,7 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "    %s: %s\n", filepath, errorMessage);
 		}
 		
-		// Remove file from our list if we couldn't read it
+		// Remove file from our list if we couldn't read it or it was empty
 		if(fdata == NULL) {
 			arrdel(files, i);
 			i--;
