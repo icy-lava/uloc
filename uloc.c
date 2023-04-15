@@ -116,7 +116,7 @@ bool matchInsensitive(String a, String b) {
 
 static inline int compareStrings(const String left, const String right) {
 	unat minSize = left.size;
-	if(right.size > minSize) minSize = right.size;
+	if(right.size < minSize) minSize = right.size;
 	
 	int comparison = memcmp(left.start, right.start, minSize);
 	if(comparison == 0) {
@@ -391,13 +391,14 @@ int main(int argc, char *argv[]) {
 		// Count number of lines which are not whitespace only, and put them into the lines array
 		char *start = fdata->data;
 		char *stop = start;
-		while((stop - fdata->data) < fdata->size) {
+		char *end = fdata->data + fdata->size;
+		while(stop < end) {
 			String line = {
 				.start = start
 			};
 			
 			// Keep moving up `stop` until LF or EOF
-			for(; stop[0] != '\n' && (stop - fdata->data) < fdata->size; stop++) {}
+			for(; stop < end && stop[0] != '\n'; stop++) {}
 			start = stop + 1;
 			
 			for(; line.start < stop; line.start++) {
