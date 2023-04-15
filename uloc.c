@@ -1,6 +1,6 @@
 #define MAJOR 0
-#define MINOR 2
-#define PATCH 2
+#define MINOR 3
+#define PATCH 0
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -12,10 +12,12 @@
 
 #ifdef _WIN32
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#define MINIRENT_IMPLEMENTATION
+#include "minirent.h"
 
-#include "dirent.h"
+// These are already defined in minirent.h:
+// #define WIN32_LEAN_AND_MEAN
+// #include <windows.h>
 
 #ifdef _WIN64
 #define ftello _ftelli64
@@ -337,8 +339,8 @@ int main(int argc, char *argv[]) {
 		
 		DIR *dir = opendir(path.start);
 		
-		// If dir is NULL, it's probably not a directory. If it doesn't exist at all,
-		// we'll print a warning later.
+		// NOTE: If dir is NULL, it's probably not a directory.
+		// If it doesn't exist at all, we'll print a warning later.
 		if(dir != NULL) {
 			struct dirent *ent;
 			while((ent = readdir(dir)) != NULL) {
@@ -373,9 +375,9 @@ int main(int argc, char *argv[]) {
 			// It's clearly not a file, so remove it
 			arrdel(files, i);
 			i--;
+			
+			closedir(dir);
 		}
-		
-		closedir(dir);
 	}
 	
 	/// Find files in directories ///
@@ -551,10 +553,6 @@ int main(int argc, char *argv[]) {
 		totalLineCount += finfo->lineCount;
 	}
 	
-	if(outputFormat == OUTPUT_DEFAULT) {
-		putc('\n', stdout);
-	}
-	
 	qsort(lines, totalLineCount, sizeof(*lines), compareLines);
 	
 	unat totalLineCountUnique = totalLineCount != 0;
@@ -565,6 +563,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	if(outputFormat == OUTPUT_DEFAULT) {
+		putc('\n', stdout);
 		outputLineDefault("total", totalLineCountUnique, totalLineCount);
 	}
 	
