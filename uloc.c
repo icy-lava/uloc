@@ -1,6 +1,6 @@
 #define MAJOR 0
 #define MINOR 2
-#define PATCH 0
+#define PATCH 1
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -170,7 +170,7 @@ void usage(FILE *stream) {
 		"    -name     : use file name instead of full path for output\n"
 		"    --        : interpret the rest of the args as files/directories\n"
 		"\n"
-		"Output options:"
+		"Output options:\n"
 		"    -noheader : don't output the header for csv/tsv formats\n"
 		"    -csv      : output information as comma separated values\n"
 		"    -tsv      : output information as tab separated values\n"
