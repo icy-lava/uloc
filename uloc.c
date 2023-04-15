@@ -1,6 +1,6 @@
 #define MAJOR 0
 #define MINOR 2
-#define PATCH 1
+#define PATCH 2
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -194,7 +194,7 @@ static void outputLineValues(OutputFormat outputFormat, FileInfo *finfo) {
 	
 	switch(outputFormat) {
 		case OUTPUT_CSV: {
-			printf("%s,%s,%s,%zu,%zu\n,%f", filepath, filename, fileext, ulines, slines, ratio);
+			printf("%s,%s,%s,%zu,%zu,%f\n", filepath, filename, fileext, ulines, slines, ratio);
 		} break;
 		case OUTPUT_TSV: {
 			printf("%s\t%s\t%s\t%zu\t%zu\t%f\n", filepath, filename, fileext, ulines, slines, ratio);
