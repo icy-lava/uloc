@@ -1,3 +1,11 @@
+#define MAJOR 0
+#define MINOR 1
+#define PATCH 0
+
+#define _STR(x) #x
+#define STR(x) _STR(x)
+#define VERSION (STR(MAJOR) "." STR(MINOR) "." STR(PATCH))
+
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 #include <stdio.h>
@@ -133,16 +141,25 @@ static int compareLines(const void *a, const void *b) {
 	return compareStrings(*(const String*)a, *(const String*)b);
 }
 
+void version(FILE *stream) {
+	if(stream == NULL) stream = stderr;
+	fprintf(stream, "uloc version %s\n", VERSION);
+}
+
 void usage(FILE *stream) {
 	if(stream == NULL) stream = stderr;
 	fputs(
 		"Usage: uloc <file|directory|-option>...\n\n"
-		"Options:\n"
-		"    -help   : show this help page\n"
-		"    -all    : don't ignore names that start with a dot\n"
-		"    -fslash : use forward-slashes as directory separators\n"
-		"    -bslash : use back-slashes as directory separators\n"
-		"    --      : interpret the rest of the args as files/directories\n"
+	, stream);
+	version(stream);
+	fputs(
+		"\nOptions:\n"
+		"    -help    : show this help page\n"
+		"    -version : get uloc version information\n"
+		"    -all     : don't ignore names that start with a dot\n"
+		"    -fslash  : use forward-slashes as directory separators\n"
+		"    -bslash  : use back-slashes as directory separators\n"
+		"    --       : interpret the rest of the args as files/directories\n"
 	, stream);
 }
 
@@ -162,6 +179,12 @@ int main(int argc, char *argv[]) {
 	
 	/// Enable UTF8 binary IO on Windows ///
 	////////////////////////////////////////
+	
+	if(argc <= 1) {
+		fputs("Error: got no arguments\n\n", stderr);
+		usage(stderr);
+		return 1;
+	}
 	
 	FileInfo *files = NULL;
 	
@@ -201,6 +224,11 @@ int main(int argc, char *argv[]) {
 				return 0;
 			}
 			
+			if(matchInsensitive(arg, litToString("-version"))) {
+				version(stdout);
+				return 0;
+			}
+			
 			if(matchInsensitive(arg, litToString("-all"))) {
 				dotfiles = true;
 				continue;
@@ -216,13 +244,13 @@ int main(int argc, char *argv[]) {
 				continue;
 			}
 			
-			fprintf(stderr, "Error: unknown option %s\n", argv[i]);
+			fprintf(stderr, "Error: unknown option %s\n\n", argv[i]);
 			usage(stderr);
 			return 1;
 		}
 		
 		if(arg.size == 0) {
-			fprintf(stderr, "Error: file path must not be empty\n");
+			fprintf(stderr, "Error: file path must not be empty\n\n");
 			usage(stderr);
 			return 1;
 		}
@@ -370,7 +398,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	if(arrlen(files) == 0) {
-		fputs("Error: no files to scan\n", stderr);
+		fputs("Error: no files to scan\n\n", stderr);
 		usage(stderr);
 		return status;
 	}
