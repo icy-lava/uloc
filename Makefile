@@ -1,12 +1,24 @@
 .PHONY: run build clean
 
-run: uloc.exe
-	uloc.exe uloc.c stb_ds.h Makefile manifest.xml
+ifeq ($(OS),Windows_NT)
+BINARY:=uloc.exe
 
-build: uloc.exe
+$(BINARY): uloc.c
+	build.bat
+
+run: $(BINARY)
+	$< .
+else
+BINARY:=uloc
+
+$(BINARY): uloc.c
+	gcc -O3 uloc.c -o $@
+
+run: $(BINARY)
+	./$< .
+endif
+
+build: $(BINARY)
 
 clean:
-	busybox rm -f uloc.exe uloc.obj uloc.o
-
-uloc.exe: uloc.c
-	cl.exe /O2 /nologo /Fe:uloc.exe uloc.c && mt.exe /nologo /manifest manifest.xml /outputresource:uloc.exe;#1
+	busybox rm -f $(BINARY) uloc.obj uloc.o uloc

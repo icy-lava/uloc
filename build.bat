@@ -1,0 +1,1 @@
+@cl.exe /O2 /nologo /Fe:uloc.exe uloc.c && mt.exe /nologo /manifest manifest.xml /outputresource:uloc.exe;#1
