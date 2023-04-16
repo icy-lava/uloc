@@ -1,6 +1,6 @@
 #define MAJOR 0
 #define MINOR 3
-#define PATCH 0
+#define PATCH 1
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -353,11 +353,21 @@ int main(int argc, char *argv[]) {
 				
 				// Create new path with file name appended
 				char *newPath = malloc(path.size + d_namlen + 1 + 1);
-				memcpy(newPath, path.start, path.size);
-				newPath[path.size] = slash;
-				memcpy(newPath + path.size + 1, ent->d_name, d_namlen);
+				char *pointer = newPath;
 				
-				unat newPathSize = path.size + 1 + d_namlen;
+				memcpy(pointer, path.start, path.size);
+				pointer += path.size;
+				
+				// Avoid separating with a slash if there's already a slash there
+				if(pointer[-1] != '/' && pointer[-1] != '\\') {
+					newPath[path.size] = slash;
+					pointer++;
+				}
+				
+				memcpy(pointer, ent->d_name, d_namlen);
+				pointer += d_namlen;
+				
+				unat newPathSize = pointer - newPath;
 				newPath[newPathSize] = 0;
 				
 				String newPathString = {

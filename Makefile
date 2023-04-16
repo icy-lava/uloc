@@ -5,20 +5,17 @@ BINARY:=uloc.exe
 
 $(BINARY): uloc.c
 	build.bat
-
-run: $(BINARY)
-	$< .
 else
 BINARY:=uloc
 
 $(BINARY): uloc.c
-	gcc -O3 uloc.c -o $@
-
-run: $(BINARY)
-	./$< .
+	gcc -Werror -O3 uloc.c -o $@
 endif
 
 build: $(BINARY)
 
+run: $(BINARY)
+	./$< .
+
 clean:
-	busybox rm -f $(BINARY) uloc.obj uloc.o uloc
+	busybox rm -f "$(BINARY)" uloc.obj uloc.o uloc
