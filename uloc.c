@@ -1,6 +1,6 @@
 #define MAJOR 0
 #define MINOR 4
-#define PATCH 0
+#define PATCH 1
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -177,19 +177,21 @@ void usage(FILE *stream) {
 		"    --        : interpret the rest of the args as files/directories\n"
 		"\n"
 		"Output:\n"
-		"    -noheader : don't output the header for csv/tsv formats\n"
+		"    -o   file\n"
+		"    -out file : output to file instead of stdout\n"
+		"    -json     : output information as JSON data\n"
 		"    -csv      : output information as comma separated values\n"
 		"    -tsv      : output information as tab separated values\n"
-		"    -json     : output information as a JSON file\n"
+		"    -noheader : don't output the header for csv/tsv formats\n"
 	, stream);
 }
 
-static void outputLineDefault(char *path, unat ulines, unat slines) {
+static void outputLineDefault(FILE *stream, char *path, unat ulines, unat slines) {
 	float percent = ulines * 100.0f / slines;
-	printf("    %s: %zu/%zu : %.1f%%\n", path, ulines, slines, percent);
+	fprintf(stream, "    %s: %zu/%zu : %.1f%%\n", path, ulines, slines, percent);
 }
 
-static void outputLineValues(OutputFormat outputFormat, FileInfo *finfo) {
+static void outputLineValues(FILE *stream, OutputFormat outputFormat, FileInfo *finfo) {
 	char *filepath = finfo->path.start;
 	char *filename = finfo->name.start;
 	char *fileext = finfo->ext.start;
@@ -201,10 +203,10 @@ static void outputLineValues(OutputFormat outputFormat, FileInfo *finfo) {
 	
 	switch(outputFormat) {
 		case OUTPUT_CSV: {
-			printf("%s,%s,%s,%zu,%zu,%f\n", filepath, filename, fileext, ulines, slines, ratio);
+			fprintf(stream, "%s,%s,%s,%zu,%zu,%f\n", filepath, filename, fileext, ulines, slines, ratio);
 		} break;
 		case OUTPUT_TSV: {
-			printf("%s\t%s\t%s\t%zu\t%zu\t%f\n", filepath, filename, fileext, ulines, slines, ratio);
+			fprintf(stream, "%s\t%s\t%s\t%zu\t%zu\t%f\n", filepath, filename, fileext, ulines, slines, ratio);
 		} break;
 	}
 }
@@ -243,6 +245,7 @@ int main(int argc, char *argv[]) {
 	bool dotfiles = false;
 	bool outputHeader = true;
 	bool nameOnly = false;
+	char *outputFilename = NULL;
 	
 	OutputFormat outputFormat = OUTPUT_DEFAULT;
 	
@@ -300,8 +303,29 @@ int main(int argc, char *argv[]) {
 				continue;
 			}
 			
-			if(matchInsensitive(arg, litToString("-noheader"))) {
-				outputHeader = false;
+			if(matchInsensitive(arg, litToString("-out")) || matchInsensitive(arg, litToString("-o"))) {
+				i++;
+				if(i >= argc) {
+					fprintf(stderr, "Error: option %s did not receive its file argument\n\n", arg.start);
+					usage(stderr);
+					return 1;
+				}
+				
+				String file = cstrToString(argv[i]);
+				
+				if(file.size == 0) {
+					fprintf(stderr, "Error: option %s can not take an empty file name\n\n", arg.start);
+					usage(stderr);
+					return 1;
+				}
+				
+				outputFilename = file.start;
+				
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-json"))) {
+				outputFormat = OUTPUT_JSON;
 				continue;
 			}
 			
@@ -315,8 +339,8 @@ int main(int argc, char *argv[]) {
 				continue;
 			}
 			
-			if(matchInsensitive(arg, litToString("-json"))) {
-				outputFormat = OUTPUT_JSON;
+			if(matchInsensitive(arg, litToString("-noheader"))) {
+				outputHeader = false;
 				continue;
 			}
 			
@@ -492,8 +516,18 @@ int main(int argc, char *argv[]) {
 	/// File reading ///
 	////////////////////
 	
+	FILE *outputStream = stdout;
+	
+	if(outputFilename != NULL) {
+		outputStream = fopen(outputFilename, "wb");
+		if(outputStream == NULL) {
+			fprintf(stderr, "Error: could not open output file for writing\n");
+			return 1;
+		}
+	}
+	
 	Jim jim = (Jim) {
-		.sink = stdout,
+		.sink = outputStream,
 		.write = (Jim_Write) fwrite,
 	};
 	String *lines = NULL;
@@ -504,16 +538,16 @@ int main(int argc, char *argv[]) {
 	
 	switch(outputFormat) {
 		case OUTPUT_DEFAULT: {
-			puts("Unique lines:");
+			fputs("Unique lines:\n", outputStream);
 		} break;
 		case OUTPUT_CSV: {
 			if(outputHeader) {
-				puts("filepath,filename,fileext,unique lines,source lines,ratio");
+				fputs("filepath,filename,fileext,unique lines,source lines,ratio\n", outputStream);
 			}
 		} break;
 		case OUTPUT_TSV: {
 			if(outputHeader) {
-				puts("filepath\tfilename\tfileext\tunique lines\tsource lines\tratio");
+				fputs("filepath\tfilename\tfileext\tunique lines\tsource lines\tratio\n", outputStream);
 			}
 		} break;
 		case OUTPUT_JSON: {
@@ -576,11 +610,11 @@ int main(int argc, char *argv[]) {
 		
 		switch(outputFormat) {
 			case OUTPUT_DEFAULT: {
-				outputLineDefault(nameOnly ? finfo->name.start : finfo->path.start, finfo->lineCountUnique, finfo->lineCount);
+				outputLineDefault(outputStream, nameOnly ? finfo->name.start : finfo->path.start, finfo->lineCountUnique, finfo->lineCount);
 			} break;
 			case OUTPUT_CSV:
 			case OUTPUT_TSV: {
-				outputLineValues(outputFormat, finfo);
+				outputLineValues(outputStream, outputFormat, finfo);
 			} break;
 			case OUTPUT_JSON: {
 				jim_object_begin(&jim);
@@ -623,8 +657,8 @@ int main(int argc, char *argv[]) {
 	
 	switch(outputFormat) {
 		case OUTPUT_DEFAULT: {
-			fputc('\n', stdout);
-			outputLineDefault("total", totalLineCountUnique, totalLineCount);
+			fputc('\n', outputStream);
+			outputLineDefault(outputStream, "total", totalLineCountUnique, totalLineCount);
 		} break;
 		case OUTPUT_JSON: {
 			jim_member_key(&jim, "totalUniqueLines");
@@ -639,6 +673,13 @@ int main(int argc, char *argv[]) {
 	
 	/// Line counting and output ///
 	////////////////////////////////
+	
+	if(outputStream != stdout && outputStream != stderr) {
+		if(fclose(outputStream) != 0) {
+			fprintf(stderr, "Error: could not close output file\n");
+			return 1;
+		}
+	}
 	
 	return status;
 }
