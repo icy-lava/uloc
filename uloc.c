@@ -1,6 +1,6 @@
 #define MAJOR 0
-#define MINOR 3
-#define PATCH 1
+#define MINOR 4
+#define PATCH 0
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -8,6 +8,9 @@
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
+#define JIM_IMPLEMENTATION
+#include "jim.h"
+
 #include <stdio.h>
 
 #ifdef _WIN32
@@ -79,12 +82,6 @@ structdef(FileInfo) {
 	FileData *data;
 };
 
-enumdef(OutputFormat) {
-	OUTPUT_DEFAULT,
-	OUTPUT_CSV,
-	OUTPUT_TSV,
-};
-
 #define uloc_error(var, message) do {assert((var) != NULL); *(var) = (message); return NULL;} while(0)
 #define uloc_assert(condition, var, message) do {assert((var) != NULL); if(!(condition)) uloc_error((var), (message));} while(0)
 
@@ -150,6 +147,13 @@ static int compareLines(const void *a, const void *b) {
 	return compareStrings(*(const String*)a, *(const String*)b);
 }
 
+enumdef(OutputFormat) {
+	OUTPUT_DEFAULT,
+	OUTPUT_CSV,
+	OUTPUT_TSV,
+	OUTPUT_JSON,
+};
+
 void version(FILE *stream) {
 	if(stream == NULL) stream = stderr;
 	fprintf(stream, "uloc version %s\n", VERSION);
@@ -172,10 +176,11 @@ void usage(FILE *stream) {
 		"    -name     : use file name instead of full path for output\n"
 		"    --        : interpret the rest of the args as files/directories\n"
 		"\n"
-		"Output options:\n"
+		"Output:\n"
 		"    -noheader : don't output the header for csv/tsv formats\n"
 		"    -csv      : output information as comma separated values\n"
 		"    -tsv      : output information as tab separated values\n"
+		"    -json     : output information as a JSON file\n"
 	, stream);
 }
 
@@ -307,6 +312,11 @@ int main(int argc, char *argv[]) {
 			
 			if(matchInsensitive(arg, litToString("-tsv"))) {
 				outputFormat = OUTPUT_TSV;
+				continue;
+			}
+			
+			if(matchInsensitive(arg, litToString("-json"))) {
+				outputFormat = OUTPUT_JSON;
 				continue;
 			}
 			
@@ -482,6 +492,10 @@ int main(int argc, char *argv[]) {
 	/// File reading ///
 	////////////////////
 	
+	Jim jim = (Jim) {
+		.sink = stdout,
+		.write = (Jim_Write) fwrite,
+	};
 	String *lines = NULL;
 	unat totalLineCount = 0;
 	
@@ -490,7 +504,7 @@ int main(int argc, char *argv[]) {
 	
 	switch(outputFormat) {
 		case OUTPUT_DEFAULT: {
-			printf("Unique lines:\n");
+			puts("Unique lines:");
 		} break;
 		case OUTPUT_CSV: {
 			if(outputHeader) {
@@ -502,6 +516,15 @@ int main(int argc, char *argv[]) {
 				puts("filepath\tfilename\tfileext\tunique lines\tsource lines\tratio");
 			}
 		} break;
+		case OUTPUT_JSON: {
+			jim_object_begin(&jim);
+			
+			jim_member_key(&jim, "fileCount");
+			jim_integer(&jim, arrlen(files));
+			
+			jim_member_key(&jim, "files");
+			jim_array_begin(&jim);
+		}
 	}
 	
 	for(int i = 0; i < arrlen(files); i++) {
@@ -552,15 +575,41 @@ int main(int argc, char *argv[]) {
 		}
 		
 		switch(outputFormat) {
-		case OUTPUT_DEFAULT: {
-			outputLineDefault(nameOnly ? finfo->name.start : finfo->path.start, finfo->lineCountUnique, finfo->lineCount);
-		}
-		case OUTPUT_CSV:
-		case OUTPUT_TSV:
-			outputLineValues(outputFormat, finfo);
+			case OUTPUT_DEFAULT: {
+				outputLineDefault(nameOnly ? finfo->name.start : finfo->path.start, finfo->lineCountUnique, finfo->lineCount);
+			} break;
+			case OUTPUT_CSV:
+			case OUTPUT_TSV: {
+				outputLineValues(outputFormat, finfo);
+			} break;
+			case OUTPUT_JSON: {
+				jim_object_begin(&jim);
+					jim_member_key(&jim, "path");
+					jim_string_sized(&jim, finfo->path.start, finfo->path.size);
+					
+					jim_member_key(&jim, "name");
+					jim_string_sized(&jim, finfo->name.start, finfo->name.size);
+					
+					jim_member_key(&jim, "extension");
+					jim_string_sized(&jim, finfo->ext.start, finfo->ext.size);
+					
+					jim_member_key(&jim, "uniqueLines");
+					jim_integer(&jim, finfo->lineCountUnique);
+					
+					jim_member_key(&jim, "sourceLines");
+					jim_integer(&jim, finfo->lineCount);
+					
+					jim_member_key(&jim, "ratio");
+					jim_float(&jim, (double)finfo->lineCountUnique / finfo->lineCount, 5);
+				jim_object_end(&jim);
+			}
 		}
 		
 		totalLineCount += finfo->lineCount;
+	}
+	
+	if(outputFormat == OUTPUT_JSON) {
+		jim_array_end(&jim);
 	}
 	
 	qsort(lines, totalLineCount, sizeof(*lines), compareLines);
@@ -572,9 +621,20 @@ int main(int argc, char *argv[]) {
 		if(compareStrings(*prev, *line) != 0) totalLineCountUnique++;
 	}
 	
-	if(outputFormat == OUTPUT_DEFAULT) {
-		putc('\n', stdout);
-		outputLineDefault("total", totalLineCountUnique, totalLineCount);
+	switch(outputFormat) {
+		case OUTPUT_DEFAULT: {
+			fputc('\n', stdout);
+			outputLineDefault("total", totalLineCountUnique, totalLineCount);
+		} break;
+		case OUTPUT_JSON: {
+			jim_member_key(&jim, "totalUniqueLines");
+			jim_integer(&jim, totalLineCountUnique);
+			
+			jim_member_key(&jim, "totalSourceLines");
+			jim_integer(&jim, totalLineCount);
+			
+			jim_object_end(&jim);
+		} break;
 	}
 	
 	/// Line counting and output ///
